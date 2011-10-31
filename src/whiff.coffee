@@ -1,66 +1,85 @@
+async = require 'async'
+util  = require 'util'
+fs    = require 'fs'
+path  = require 'path'
+
 class App
-    constructor: (@renderers, @detectors, @data) ->
-    	if not data
-    		data = []
+    constructor: (@renderers, @detectors) ->
+        @data ?= {}
+        if path.existsSync "data.json"
+            @data = JSON.parse(fs.readFileSync("data.json", "utf8"))
 
-    run: (urls) ->
-        results = []
-        for url in urls
-        	results.push(this.proces(url));
-        results
+    # Makes new captures and diffs from the supplied URLs. You can supply an ID to 
+    # be used, for example a commit hash.
+    run: (urls, id = Date.now(), callback) ->
+        captureKey = Date.now()
+        queue = async.queue((url, callback) =>
+            page = @data[url] ?= {}
+            page.captures ?= {}
+            @capture(url, id, (result) ->
+                page.captures[captureKey] = result
+                callback()
+            )
+        , 2)
+        queue.drain = =>
+            fs.writeFile("data.json", JSON.stringify(@data))
+            callback(@data)
+        queue.push url for url in urls
 
-    proces: (url) ->
-        urlData = data[url]
-        pageResult =
-        	result: "fail"
+    capture: (url, id, callback) ->
+        capture =
+            renders: {}
+            identifier: id
         
-        for renderer in this.renderers
-	        console.log("[render] #{renderer.id} #{url}")
-	        renderResult = renderer.render(url)
-	        urlData.captures.push(renderResult)
+        render = (renderer, callback) ->
+            path = "./#{renderer.id}-#{Date.now()}.png"
+            console.log("[render] #{renderer.id} #{url}")
+            renderer.render url, path, (result) ->
+                capture.renders[renderer.id] = result
+                callback()
+        
+        async.forEach @renderers, render, -> callback(capture)
 
-	        previousImage = urlData.captures[urlData.captures.length].image
-	        if (!previousImage)
-	        	renderResult.result = "warning"
-	        	renderResult.message = "No previous rendering, can't compare."
-	        	continue
+    diff: (older, newer, callback) ->
+        diff = 
+            older: older
+            newer: newer
+            results: {}
 
-	        detectResults = []
-	        for detector in this.detectors
-	        	console.log("[detect] #{detector.id}")
-	        	result = 
-	        		url: url
-	        		result: detector.detect(previousImage, renderResult.image)
-	        	detectResults.push result
-	        
-	        urlData.reports.push(detectResults)
+        for detector in this.detectors
+            console.log("[detect] #{detector.id}")
+            results[detector.id] = detector.detect(older, newer)
 
-
-
-
+        return diff
+        
 class WebKitRenderer
-	id: "webkit"
+    id: "webkit"
 
-	render: (url) ->
-		console.log("Do some rendering in phantomjs, output img")
-		result = 
-			status: "ok"
-			image: "imagename.png"
-		result
+    render: (url, path, callback) ->
+        exec = require('child_process').exec
+        exec "phantomjs rasterize.coffee #{url} #{path}", (error) ->
+            result = 
+                status: if error? then "error" else "ok"
+                message: if error? then error.message
+                image: path
+            callback result
 
 class FakeDetector
-	id: "fake"
+    id: "fake"
 
-	detect: (previous, new) ->
-		result = 
-			status: "warning"
-			message: "Page changed 13% which is more than the treshold (5%)."
-		result
+    detect: (older, newer) ->
+        result = 
+            status: "warning"
+            message: "Page changed 13% which is more than the treshold (5%)."
+        result
 
 
 urls = [
     "http://www.google.com?q=time"
+    "http://www.google.com?q=time"
+    "http://www.google.com?q=time"
 ]
 
-app = new App
-app.run urls
+app = new App([new WebKitRenderer], [new FakeDetector])
+app.run urls, "testid", (result) ->   
+    console.log util.inspect(result, true, 10)
