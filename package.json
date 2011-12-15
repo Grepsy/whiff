@@ -1,0 +1,19 @@
+{
+  "author": "Robert Massa <robertmassa@gmail.com>",
+  "name": "whiff",
+  "description": "Web differ",
+  "version": "0.0.0",
+  "homepage": "https://github.com/Grepsy/whiff",
+  "repository": {
+    "type": "git",
+    "url": "git://github.com/Grepsy/whiff.git"
+  },
+  "engines": {
+    "node": "~0.6.5"
+  },
+  "dependencies": {
+    "connect": "~1.8.2",
+    "connect-assets": "2.1.6"
+  },
+  "devDependencies": {}
+}
